@@ -1,0 +1,19 @@
+# Don't copy these into Docker build context
+.env
+.env.local
+.env.production
+uploads/
+__pycache__/
+*.pyc
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+.git/
+.gitignore
+*.md
+tests/

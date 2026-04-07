@@ -1,0 +1,56 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* highlight.js theme — GitHub Dark */
+
+@layer base {
+     :root {
+        color-scheme: dark;
+    }
+    * {
+        box-sizing: border-box;
+    }
+    html {
+        font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    }
+    body {
+        @apply bg-neutral-950 text-neutral-100 antialiased;
+        font-family: var(--font-geist-sans), system-ui, -apple-system, sans-serif;
+    }
+}
+
+@layer utilities {
+    /* Custom scrollbar */
+    .scrollbar-thin {
+        scrollbar-width: thin;
+        scrollbar-color: rgb(64 64 64) transparent;
+    }
+    .scrollbar-thin::-webkit-scrollbar {
+        width: 4px;
+    }
+    .scrollbar-thin::-webkit-scrollbar-track {
+        background: transparent;
+    }
+    .scrollbar-thin::-webkit-scrollbar-thumb {
+        background-color: rgb(64 64 64);
+        border-radius: 2px;
+    }
+    /* scrollbar-thumb colour helpers used alongside scrollbar-thin */
+    .scrollbar-thumb-neutral-600::-webkit-scrollbar-thumb { background-color: rgb(82 82 82); }
+    .scrollbar-thumb-neutral-700::-webkit-scrollbar-thumb { background-color: rgb(64 64 64); }
+    .scrollbar-thumb-neutral-800::-webkit-scrollbar-thumb { background-color: rgb(38 38 38); }
+    /* Streaming cursor blink */
+    @keyframes blink {
+        0%,
+        100% {
+            opacity: 1;
+        }
+        50% {
+            opacity: 0;
+        }
+    }
+    .animate-blink {
+        animation: blink 0.8s step-end infinite;
+    }
+}

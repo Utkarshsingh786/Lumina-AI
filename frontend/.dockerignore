@@ -1,0 +1,9 @@
+.env.local
+.env.production
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+.git/
+.gitignore
+*.md

@@ -1,0 +1,14 @@
+# Frontend-specific ignores
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+
+# Secrets
+.env.local
+.env.production
+!.env.local.example
+
+# Logs
+npm-debug.log*
+yarn-error.log*

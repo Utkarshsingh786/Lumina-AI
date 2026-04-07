@@ -1,0 +1,71 @@
+# ─── Secrets & Environment ────────────────────────────────────────────────────
+.env
+.env.local
+.env.production
+.env.staging
+*.env
+!*.env.example          # keep example files
+
+# ─── Python ───────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+.venv/
+venv/
+env/
+pip-wheel-metadata/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+*.log
+
+# ─── Node / Next.js ───────────────────────────────────────────────────────────
+node_modules/
+.next/
+out/
+frontend/.next/
+frontend/out/
+frontend/node_modules/
+*.tsbuildinfo
+npm-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# ─── Docker ───────────────────────────────────────────────────────────────────
+# Keep docker-compose.yml — exclude only overrides with real credentials
+docker-compose.override.yml
+docker-compose.prod.yml
+
+# ─── Uploads / User data ──────────────────────────────────────────────────────
+# Uploaded files must never be committed (contain user PII)
+backend/uploads/
+uploads/
+
+# ─── Database ─────────────────────────────────────────────────────────────────
+*.sqlite
+*.db
+*.sqlite3
+postgres_data/
+
+# ─── IDE & OS ─────────────────────────────────────────────────────────────────
+.claude/
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+*.orig
+
+# ─── Alembic ──────────────────────────────────────────────────────────────────
+# Keep migrations folder — exclude only auto-generated temp files
+alembic/versions/*.pyc
