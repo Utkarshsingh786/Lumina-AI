@@ -80,17 +80,20 @@ class ChatService:
         conversation_id: UUID,
         user_id: UUID,
         content: str,
+        attachments: list[dict] | None = None,
     ) -> Message:
         """Persist user message and update conversation metadata."""
         from app.utils.tokens import count_message_tokens
 
         token_count = count_message_tokens("user", content)
+        metadata = {"attachments": attachments} if attachments else {}
         msg = await self.msg_repo.create(
             conversation_id=conversation_id,
             user_id=user_id,
             role="user",
             content=content,
             token_count=token_count,
+            extra_metadata=metadata,
         )
         await self.conv_repo.touch_last_message(conversation_id)
         return msg
@@ -371,12 +374,56 @@ class ChatService:
     # Public chat entry points
     # ──────────────────────────────────────────────────────────────────────────
 
+    async def _load_attached_documents(
+        self,
+        attached_document_ids: list[str],
+        user_id: UUID,
+    ) -> tuple[str, list[dict]]:
+        """
+        Read file content for inline attachments.
+
+        Returns:
+          - file_prefix: text block to prepend to the AI context message
+          - attachments_meta: list of {filename, doc_id} for DB metadata
+        """
+        from app.repositories.document_repo import DocumentRepository
+        from app.services.document_service import DocumentService
+
+        repo = DocumentRepository(self.db)
+        doc_blocks: list[str] = []
+        attachments_meta: list[dict] = []
+
+        for raw_id in attached_document_ids:
+            try:
+                doc_id = UUID(raw_id)
+            except ValueError:
+                continue
+
+            doc = await repo.get_user_document(doc_id, user_id)
+            if not doc:
+                continue
+
+            text = DocumentService.read_text(doc.storage_path, doc.file_type)
+            if text.strip():
+                doc_blocks.append(
+                    f"[Attached file: {doc.filename}]\n{text.strip()}"
+                )
+            attachments_meta.append({"filename": doc.filename, "doc_id": raw_id})
+
+        file_prefix = ""
+        if doc_blocks:
+            separator = "\n\n---\n\n"
+            file_prefix = separator.join(doc_blocks) + "\n\n---\n\n"
+
+        return file_prefix, attachments_meta
+
     async def chat_stream(
         self,
         conversation: Conversation,
         user_message: str,
         user_id: UUID,
         existing_user_msg: "Message | None" = None,
+        attached_document_ids: list[str] | None = None,
     ) -> AsyncGenerator[dict, None]:
         """
         Main streaming chat pipeline.
@@ -389,8 +436,20 @@ class ChatService:
           {"type": "error",       "message": "..."}
 
         Pass `existing_user_msg` to skip saving a new user message (e.g. regenerate path).
+        Pass `attached_document_ids` to inject file content directly into this turn's context.
         """
-        # 1. Save user message (skip if regenerating from an existing one)
+        # 1. Load inline file attachments (ChatGPT-style: injected into this turn, not RAG)
+        file_prefix = ""
+        attachments_meta: list[dict] = []
+        if attached_document_ids:
+            try:
+                file_prefix, attachments_meta = await self._load_attached_documents(
+                    attached_document_ids, user_id
+                )
+            except Exception as e:
+                logger.warning("chat_service.attachment_load_error", error=str(e))
+
+        # 2. Save user message — store display text only (not file content); attachments in metadata
         if existing_user_msg is not None:
             user_msg = existing_user_msg
         else:
@@ -398,7 +457,11 @@ class ChatService:
                 conversation_id=conversation.id,
                 user_id=user_id,
                 content=user_message,
+                attachments=attachments_meta or None,
             )
+
+        # 3. Build AI context: prepend file content to the message so the model sees it
+        context_message = file_prefix + user_message if file_prefix else user_message
 
         model = conversation.model
 
@@ -411,7 +474,7 @@ class ChatService:
         if settings.TOOLS_ENABLED and model_supports_tools:
             async for event in self._chat_with_tools(
                 conversation=conversation,
-                user_message=user_message,
+                user_message=context_message,
                 user_id=user_id,
                 model=model,
             ):
@@ -423,7 +486,7 @@ class ChatService:
             return
 
         # ── Direct streaming path (no tools) ────────────────────────────────
-        messages = await self._build_context(conversation, user_message)
+        messages = await self._build_context(conversation, context_message)
 
         provider, resolved_model = get_provider_for_model(model)
 

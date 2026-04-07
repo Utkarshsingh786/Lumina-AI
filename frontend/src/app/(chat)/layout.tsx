@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
 import { Sidebar } from "@/components/sidebar/Sidebar";
@@ -9,27 +9,32 @@ import { useChatStore } from "@/store/chat";
 import { authService } from "@/services/auth.service";
 
 export default function ChatLayout({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated, setUser, setLoading, logout } = useAuthStore();
+  const { setUser, logout } = useAuthStore();
   const { sidebarOpen, setSidebarOpen } = useChatStore();
   const router = useRouter();
+  // sessionChecked tracks whether we've validated the token with the server.
+  // We always validate on mount — Zustand-persisted isAuthenticated may be stale
+  // (e.g. tokens cleared after browser restart / sessionStorage lost on tab close).
+  const [sessionChecked, setSessionChecked] = useState(false);
 
   useEffect(() => {
     const restoreSession = async () => {
-      if (isAuthenticated) return;
       try {
+        // Always call /auth/me — the 401 interceptor handles token refresh
         const user = await authService.getMe();
         setUser(user);
+        setSessionChecked(true);
       } catch {
+        // Either tokens are gone or refresh also failed (interceptor already redirected)
         logout();
         router.replace("/login");
-      } finally {
-        setLoading(false);
+        // Don't set sessionChecked — navigation is in progress
       }
     };
     restoreSession();
   }, []);
 
-  if (!isAuthenticated) {
+  if (!sessionChecked) {
     return (
       <div className="flex h-screen items-center justify-center bg-neutral-950">
         <div className="w-8 h-8 border-2 border-brand-500 border-t-transparent rounded-full animate-spin" />

@@ -260,7 +260,7 @@ export function Sidebar({ onClose }: SidebarProps = {}) {
               Settings
             </button>
             <button
-              onClick={logout}
+              onClick={() => { logout(); router.push("/login"); }}
               className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-neutral-400 hover:text-red-400 hover:bg-red-500/5 transition-colors text-sm"
             >
               <LogOut className="w-4 h-4" />
@@ -334,7 +334,7 @@ export function Sidebar({ onClose }: SidebarProps = {}) {
               <Settings className="w-4 h-4" />
             </button>
             <button
-              onClick={logout}
+              onClick={() => { logout(); router.push("/login"); }}
               title="Sign out"
               className="w-full flex items-center justify-center p-2 rounded-lg text-neutral-500 hover:text-red-400 hover:bg-red-500/5 transition-colors"
             >

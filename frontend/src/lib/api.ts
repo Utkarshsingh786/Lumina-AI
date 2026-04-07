@@ -1,14 +1,16 @@
 /**
- * Axios API client with auth interceptors.
+ * Axios API client with auth interceptors and global error handling.
  *
  * Design:
  * - Single axios instance — one place for base URL, timeout, headers
  * - Request interceptor: attach Bearer token from storage
- * - Response interceptor: handle 401 → refresh token flow
- * - Errors normalized to APIError shape for consistent handling
+ * - Response interceptor: 401 → refresh token flow (skipped for auth endpoints)
+ * - Global toasts for network failures, server errors, and permission errors
+ * - Auth endpoint 401s (wrong credentials) bubble up to forms for inline display
  */
 
 import axios, { AxiosError, type AxiosInstance } from "axios";
+import toast from "react-hot-toast";
 import type { APIError } from "@/types/api";
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL
@@ -23,10 +25,18 @@ export const apiClient: AxiosInstance = axios.create({
   },
 });
 
+// ── Auth endpoint detection ───────────────────────────
+// 401s on these paths mean "bad credentials", not "expired session".
+// They must NOT trigger the refresh/redirect interceptor — let them
+// reach the form's catch block for inline error display.
+const AUTH_ENDPOINTS = ["/auth/login", "/auth/register", "/auth/refresh", "/auth/logout"];
+
+function isAuthEndpoint(url: string | undefined): boolean {
+  return AUTH_ENDPOINTS.some((p) => url?.includes(p));
+}
+
 // ── Request Interceptor ───────────────────────────────
 apiClient.interceptors.request.use((config) => {
-  // Read token from memory (not localStorage for security)
-  // Tokens are stored in the auth Zustand store
   const token = getStoredAccessToken();
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
@@ -56,77 +66,124 @@ apiClient.interceptors.response.use(
       _retry?: boolean;
     };
 
-    // ── 429 Rate Limited ───────────────────────────────
-    if (error.response?.status === 429) {
-      const details = error.response.data?.details as Record<string, unknown> | undefined;
+    // ── Network / timeout errors (no response from server) ──
+    if (!error.response) {
+      const isTimeout = error.code === "ECONNABORTED" || error.message?.includes("timeout");
+      if (isTimeout) {
+        toast.error("Request timed out. Please try again.", { id: "timeout-error" });
+      } else {
+        toast.error("Connection failed. Check your internet connection.", {
+          id: "network-error",
+        });
+      }
+      return Promise.reject(error);
+    }
+
+    const status = error.response.status;
+    const data = error.response.data;
+    const url = originalRequest?.url;
+
+    // ── 429 Rate Limited ──────────────────────────────────
+    if (status === 429) {
+      const details = data?.details as Record<string, unknown> | undefined;
       const retryAfter = typeof details?.retry_after === "number" ? details.retry_after : null;
       const message = retryAfter
         ? `Too many requests — try again in ${retryAfter}s`
-        : (error.response.data?.message ?? "Too many requests. Please slow down.");
+        : (data?.message ?? "Too many requests. Please slow down.");
 
-      // Attach friendly message so callers can display it without re-parsing
-      const enriched = new Error(message) as Error & { isRateLimited: true; retryAfter: number | null };
+      toast.error(message, { id: "rate-limit" });
+
+      const enriched = new Error(message) as Error & {
+        isRateLimited: true;
+        retryAfter: number | null;
+      };
       enriched.isRateLimited = true;
       enriched.retryAfter = retryAfter;
       return Promise.reject(enriched);
     }
 
-    if (error.response?.status === 401 && !originalRequest._retry) {
-      if (isRefreshing) {
-        // Queue this request until refresh completes
-        return new Promise((resolve, reject) => {
-          failedQueue.push({ resolve, reject });
-        }).then((token) => {
-          originalRequest.headers!.Authorization = `Bearer ${token}`;
-          return apiClient(originalRequest);
-        });
-      }
-
-      originalRequest._retry = true;
-      isRefreshing = true;
-
-      const refreshToken = getStoredRefreshToken();
-      if (!refreshToken) {
-        isRefreshing = false;
-        // Force logout
-        clearStoredTokens();
-        window.location.href = "/login";
+    // ── 401 Unauthorized ──────────────────────────────────
+    // Auth endpoints: let the error bubble up to the form (wrong credentials).
+    // Other endpoints: try token refresh, then redirect to login.
+    if (status === 401) {
+      if (isAuthEndpoint(url)) {
+        // Bad credentials — caller's catch block will show the error inline
         return Promise.reject(error);
       }
 
-      try {
-        const { data } = await axios.post(`${BASE_URL}/auth/refresh`, {
-          refresh_token: refreshToken,
-        });
-        storeTokens(data.access_token, data.refresh_token);
-        processQueue(null, data.access_token);
-        originalRequest.headers!.Authorization = `Bearer ${data.access_token}`;
-        return apiClient(originalRequest);
-      } catch (refreshError) {
-        processQueue(refreshError, null);
-        clearStoredTokens();
-        window.location.href = "/login";
-        return Promise.reject(refreshError);
-      } finally {
-        isRefreshing = false;
+      if (!originalRequest._retry) {
+        if (isRefreshing) {
+          // Queue this request until refresh completes
+          return new Promise((resolve, reject) => {
+            failedQueue.push({ resolve, reject });
+          }).then((token) => {
+            originalRequest.headers!.Authorization = `Bearer ${token}`;
+            return apiClient(originalRequest);
+          });
+        }
+
+        originalRequest._retry = true;
+        isRefreshing = true;
+
+        const refreshToken = getStoredRefreshToken();
+        if (!refreshToken) {
+          isRefreshing = false;
+          clearStoredTokens();
+          window.location.href = "/login";
+          return Promise.reject(error);
+        }
+
+        try {
+          const { data: tokenData } = await axios.post(`${BASE_URL}/auth/refresh`, {
+            refresh_token: refreshToken,
+          });
+          storeTokens(tokenData.access_token, tokenData.refresh_token);
+          processQueue(null, tokenData.access_token);
+          originalRequest.headers!.Authorization = `Bearer ${tokenData.access_token}`;
+          return apiClient(originalRequest);
+        } catch (refreshError) {
+          processQueue(refreshError, null);
+          clearStoredTokens();
+          window.location.href = "/login";
+          return Promise.reject(refreshError);
+        } finally {
+          isRefreshing = false;
+        }
       }
+    }
+
+    // ── 403 Forbidden ──────────────────────────────────────
+    if (status === 403) {
+      toast.error(data?.message || "You don't have permission to do this.", {
+        id: "forbidden",
+      });
+    }
+
+    // ── 5xx Server Errors ──────────────────────────────────
+    if (status >= 500) {
+      const serverMessage =
+        status === 503
+          ? "Service temporarily unavailable. Try again shortly."
+          : status === 504
+          ? "The server took too long to respond. Try again."
+          : data?.message || "Something went wrong on our end. Please try again.";
+
+      toast.error(serverMessage, { id: `server-${status}` });
     }
 
     return Promise.reject(error);
   }
 );
 
-// ── Token Storage (in-memory + sessionStorage) ────────
-// We use sessionStorage (not localStorage) for the access token —
-// cleared on tab close, not accessible to other tabs.
-// Refresh token goes in httpOnly cookie in production.
+// ── Token Storage ─────────────────────────────────────
+// sessionStorage: cleared on tab close, not accessible cross-tab.
+// In production, refresh token should move to an httpOnly cookie.
 
 let _accessToken: string | null = null;
 
 export function storeTokens(accessToken: string, refreshToken: string): void {
   _accessToken = accessToken;
   sessionStorage.setItem("lumina_access_token", accessToken);
-  // In production: refresh token should be httpOnly cookie set by backend
   sessionStorage.setItem("lumina_refresh_token", refreshToken);
 }
 

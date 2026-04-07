@@ -9,7 +9,6 @@ import { ShareButton } from "./ShareButton";
 import { ToolCallCard } from "./ToolCallCard";
 import { TypingIndicator } from "./TypingIndicator";
 import { MessageInput } from "./MessageInput";
-import { DocumentList } from "./DocumentList";
 import { useConversation } from "@/hooks/useConversations";
 import { useStream } from "@/hooks/useStream";
 import { useChatStore, useStreamingContent } from "@/store/chat";
@@ -225,7 +224,6 @@ export function ChatWindow({ conversationId }: ChatWindowProps) {
 
       {/* ── Input area ────────────────────────────────── */}
       <div className="flex-shrink-0 border-t border-neutral-800 bg-neutral-900/80 backdrop-blur-sm">
-        <DocumentList conversationId={conversationId} />
         <div className="max-w-3xl mx-auto px-4 py-4">
           <MessageInput
             onSend={sendMessage}

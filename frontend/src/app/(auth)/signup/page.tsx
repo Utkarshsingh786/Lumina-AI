@@ -1,16 +1,20 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { Sparkles } from "lucide-react";
+import { Eye, EyeOff, Sparkles } from "lucide-react";
 import { authService } from "@/services/auth.service";
 import { useAuthStore } from "@/store/auth";
 import { cn } from "@/lib/utils";
 import toast from "react-hot-toast";
 
-export default function SignupPage() {
+function SignupForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const rawNext = searchParams.get("next") || "/";
+  // Prevent open redirect — only allow relative paths
+  const nextUrl = rawNext.startsWith("/") ? rawNext : "/";
   const { setUser, setTokens } = useAuthStore();
   const [form, setForm] = useState({
     email: "",
@@ -18,6 +22,7 @@ export default function SignupPage() {
     password: "",
     full_name: "",
   });
+  const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
@@ -31,7 +36,7 @@ export default function SignupPage() {
       const user = await authService.getMe();
       setUser(user);
       toast.success("Account created! Welcome to Lumina.");
-      router.replace("/");
+      router.replace(nextUrl);
     } catch (err: any) {
       const data = err.response?.data;
       if (data?.error_code === "EMAIL_EXISTS") {
@@ -64,17 +69,17 @@ export default function SignupPage() {
             </div>
           )}
 
+          {/* Text fields */}
           {[
-            { key: "full_name", label: "Full name", type: "text", placeholder: "Jane Smith" },
-            { key: "username", label: "Username", type: "text", placeholder: "janesmith" },
-            { key: "email", label: "Email", type: "email", placeholder: "jane@example.com" },
-            { key: "password", label: "Password", type: "password", placeholder: "Min 8 chars, 1 uppercase, 1 number" },
-          ].map(({ key, label, type, placeholder }) => (
+            { key: "full_name", label: "Full name", type: "text", placeholder: "Jane Smith", required: false },
+            { key: "username", label: "Username", type: "text", placeholder: "janesmith", required: true },
+            { key: "email", label: "Email", type: "email", placeholder: "jane@example.com", required: true },
+          ].map(({ key, label, type, placeholder, required }) => (
             <div key={key}>
               <label className="block text-sm text-neutral-400 mb-1.5">{label}</label>
               <input
                 type={type}
-                required={key !== "full_name"}
+                required={required}
                 value={(form as any)[key]}
                 onChange={(e) => setForm({ ...form, [key]: e.target.value })}
                 placeholder={placeholder}
@@ -92,6 +97,37 @@ export default function SignupPage() {
             </div>
           ))}
 
+          {/* Password field with show/hide */}
+          <div>
+            <label className="block text-sm text-neutral-400 mb-1.5">Password</label>
+            <div className="relative">
+              <input
+                type={showPassword ? "text" : "password"}
+                required
+                value={form.password}
+                onChange={(e) => setForm({ ...form, password: e.target.value })}
+                placeholder="Min 8 chars, 1 uppercase, 1 number"
+                className={cn(
+                  "w-full px-4 py-2.5 bg-neutral-800 border rounded-xl text-sm text-neutral-100 pr-10",
+                  "placeholder:text-neutral-600 focus:outline-none transition-colors",
+                  errors.password
+                    ? "border-red-500/50 focus:border-red-500"
+                    : "border-neutral-700 focus:border-brand-500/50"
+                )}
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-neutral-300"
+              >
+                {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
+            </div>
+            {errors.password && (
+              <p className="text-xs text-red-400 mt-1">{errors.password}</p>
+            )}
+          </div>
+
           <button
             type="submit"
             disabled={isLoading}
@@ -103,11 +139,22 @@ export default function SignupPage() {
 
         <p className="text-center text-sm text-neutral-500 mt-6">
           Already have an account?{" "}
-          <Link href="/login" className="text-brand-400 hover:text-brand-300">
+          <Link
+            href={nextUrl !== "/" ? `/login?next=${encodeURIComponent(nextUrl)}` : "/login"}
+            className="text-brand-400 hover:text-brand-300"
+          >
             Sign in
           </Link>
         </p>
       </div>
     </div>
+  );
+}
+
+export default function SignupPage() {
+  return (
+    <Suspense>
+      <SignupForm />
+    </Suspense>
   );
 }

@@ -25,6 +25,11 @@ from app.core.config import settings
 
 logger = get_logger(__name__)
 
+# Pre-hashed dummy used for constant-time login response when the user doesn't exist.
+# Computed once at import time so it's always a structurally valid bcrypt hash.
+# This prevents user enumeration via timing differences.
+_DUMMY_HASH: str = hash_password("__lumina_timing_protection_dummy__")
+
 
 class AuthService:
     def __init__(self, db: AsyncSession) -> None:
@@ -65,9 +70,8 @@ class AuthService:
         email = email.lower()
         user = await self.user_repo.get_by_email(email)
 
-        # Verify even if user doesn't exist (prevents timing attacks)
-        dummy_hash = "$2b$12$notarealhashbutsamelength000000000000000000000000"
-        stored_hash = user.hashed_password if user else dummy_hash
+        # Verify even if user doesn't exist (prevents timing attacks via user enumeration)
+        stored_hash = user.hashed_password if user else _DUMMY_HASH
 
         if not verify_password(password, stored_hash) or not user:
             logger.warning("auth.login_failed", email=email)

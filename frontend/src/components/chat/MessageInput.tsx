@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { ArrowUp, Paperclip, Square, Lock } from "lucide-react";
+import { ArrowUp, FileText, Loader2, Paperclip, Square, Lock, X } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import toast from "react-hot-toast";
 import { cn } from "@/lib/utils";
@@ -11,19 +11,27 @@ import { apiClient } from "@/lib/api";
 import { ModelSelector } from "./ModelSelector";
 import { MicButton } from "@/components/voice/MicButton";
 import { useVoice } from "@/hooks/useVoice";
-import type { ModelsResponse } from "@/types/api";
-import { useUploadDocument } from "@/hooks/useDocuments";
+import type { ModelsResponse, Document } from "@/types/api";
 import { useUpdateConversation } from "@/hooks/useConversations";
+import { documentService } from "@/services/document.service";
 
 interface MessageInputProps {
-  onSend: (content: string) => void;
+  onSend: (content: string, attachedDocIds?: string[]) => void;
   conversationId: string;
-  /** The model stored on the conversation in the DB */
   conversationModel: string;
-  /** Whether this conversation already has messages — locks the model selector */
   hasMessages: boolean;
   disabled?: boolean;
   placeholder?: string;
+}
+
+interface PendingAttachment {
+  /** Local UUID — only used as React key before upload completes */
+  localId: string;
+  filename: string;
+  /** Set once the upload succeeds */
+  docId?: string;
+  status: "uploading" | "ready" | "error";
+  errorMsg?: string;
 }
 
 const SUGGESTED_PROMPTS = [
@@ -48,22 +56,18 @@ export function MessageInput({
 }: MessageInputProps) {
   const [content, setContent] = useState("");
   const [showSuggestions, setShowSuggestions] = useState(false);
+  const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { streaming, abortStream, selectedModel, setSelectedModel } = useChatStore();
   const isStreaming = streaming?.conversationId === conversationId && streaming.isStreaming;
-  const { mutate: uploadDocument, isPending: isUploading } = useUploadDocument(conversationId);
   const { mutate: updateConversation } = useUpdateConversation();
 
   const { recordState, interimText, toggleRecording } = useVoice({
     onTranscript: (text, autoSubmit) => {
       if (autoSubmit && !disabled && !isStreaming) {
-        // Web Speech API path: send immediately like ChatGPT
-        onSend(text.trim());
-        setContent("");
-        setShowSuggestions(false);
+        handleSendWithAttachments(text.trim());
       } else {
-        // Whisper path: populate the box so the user can review/edit
         setContent((prev) => prev ? `${prev} ${text}` : text);
         textareaRef.current?.focus();
       }
@@ -80,9 +84,6 @@ export function MessageInput({
   const models = modelsData?.models ?? [];
   const defaultModel = modelsData?.default ?? "";
 
-  // Sync Zustand selectedModel from the conversation's stored model.
-  // This ensures the selector always reflects DB truth, not stale Zustand state
-  // when navigating between conversations.
   useEffect(() => {
     if (conversationModel) {
       setSelectedModel(conversationModel);
@@ -91,13 +92,11 @@ export function MessageInput({
     }
   }, [conversationId, conversationModel, defaultModel]);
 
-  // The model shown in the selector = what's in the DB (via selectedModel)
   const currentModel = selectedModel ?? conversationModel ?? defaultModel;
 
   const handleModelChange = (newModel: string) => {
-    if (hasMessages) return; // locked — should never be called, but guard anyway
+    if (hasMessages) return;
     setSelectedModel(newModel);
-    // Persist model choice to DB immediately so the backend uses it
     updateConversation({ id: conversationId, model: newModel });
   };
 
@@ -113,13 +112,73 @@ export function MessageInput({
     textareaRef.current?.focus();
   }, [conversationId]);
 
+  // ── File attachment ──────────────────────────────────────────────────────
+
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? []);
+    e.target.value = "";
+    if (!files.length) return;
+
+    for (const file of files) {
+      const localId = `local-${Date.now()}-${Math.random()}`;
+      // Add a pending chip immediately
+      setAttachments((prev) => [
+        ...prev,
+        { localId, filename: file.name, status: "uploading" },
+      ]);
+
+      // Upload in background — chip shows spinner until done
+      documentService
+        .upload(conversationId, file)
+        .then((doc: Document) => {
+          setAttachments((prev) =>
+            prev.map((a) =>
+              a.localId === localId ? { ...a, docId: doc.id, status: "ready" } : a
+            )
+          );
+        })
+        .catch((err: unknown) => {
+          const msg =
+            (err as { response?: { data?: { message?: string } } })?.response?.data?.message ||
+            "Upload failed";
+          setAttachments((prev) =>
+            prev.map((a) =>
+              a.localId === localId ? { ...a, status: "error", errorMsg: msg } : a
+            )
+          );
+          toast.error(`${file.name}: ${msg}`);
+        });
+    }
+  };
+
+  const removeAttachment = (localId: string) => {
+    setAttachments((prev) => prev.filter((a) => a.localId !== localId));
+  };
+
+  const isUploading = attachments.some((a) => a.status === "uploading");
+
+  // ── Send ─────────────────────────────────────────────────────────────────
+
+  const handleSendWithAttachments = useCallback(
+    (text: string) => {
+      const trimmed = text.trim();
+      if (!trimmed || disabled || isStreaming) return;
+
+      const readyDocIds = attachments
+        .filter((a) => a.status === "ready" && a.docId)
+        .map((a) => a.docId!);
+
+      onSend(trimmed, readyDocIds.length > 0 ? readyDocIds : undefined);
+      setContent("");
+      setAttachments([]);
+      setShowSuggestions(false);
+    },
+    [attachments, disabled, isStreaming, onSend]
+  );
+
   const handleSend = useCallback(() => {
-    const trimmed = content.trim();
-    if (!trimmed || disabled || isStreaming) return;
-    onSend(trimmed);
-    setContent("");
-    setShowSuggestions(false);
-  }, [content, disabled, isStreaming, onSend]);
+    handleSendWithAttachments(content);
+  }, [content, handleSendWithAttachments]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -128,13 +187,13 @@ export function MessageInput({
     }
   };
 
-  const canSend = content.trim().length > 0 && !disabled && !isStreaming;
+  const canSend = content.trim().length > 0 && !disabled && !isStreaming && !isUploading;
 
   return (
     <div className="relative">
       {/* Suggested prompts */}
       <AnimatePresence>
-        {showSuggestions && !content && (
+        {showSuggestions && !content && attachments.length === 0 && (
           <motion.div
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
@@ -159,34 +218,77 @@ export function MessageInput({
         className={cn(
           "relative flex flex-col rounded-2xl border transition-all",
           "bg-neutral-800/80 backdrop-blur-sm",
-          content || showSuggestions
+          content || attachments.length > 0 || showSuggestions
             ? "border-brand-500/50 shadow-[0_0_0_1px_rgba(14,165,233,0.2)]"
             : "border-neutral-700",
           "p-2"
         )}
       >
+        {/* ── Attachment chips — shown above textarea ── */}
+        <AnimatePresence initial={false}>
+          {attachments.length > 0 && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: "auto" }}
+              exit={{ opacity: 0, height: 0 }}
+              className="flex flex-wrap gap-1.5 px-1 pb-2"
+            >
+              {attachments.map((att) => (
+                <motion.div
+                  key={att.localId}
+                  initial={{ opacity: 0, scale: 0.9 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.9 }}
+                  className={cn(
+                    "flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs border max-w-[200px]",
+                    att.status === "ready"
+                      ? "bg-neutral-700 border-neutral-600 text-neutral-200"
+                      : att.status === "error"
+                      ? "bg-red-500/10 border-red-500/30 text-red-400"
+                      : "bg-neutral-800 border-neutral-700 text-neutral-400"
+                  )}
+                >
+                  {att.status === "uploading" ? (
+                    <Loader2 className="w-3 h-3 flex-shrink-0 animate-spin" />
+                  ) : (
+                    <FileText className="w-3 h-3 flex-shrink-0" />
+                  )}
+                  <span className="truncate">{att.filename}</span>
+                  {att.status === "error" && (
+                    <span className="text-red-400 text-[10px] flex-shrink-0">failed</span>
+                  )}
+                  <button
+                    onClick={() => removeAttachment(att.localId)}
+                    className="flex-shrink-0 rounded p-0.5 hover:bg-neutral-600 transition-colors"
+                    title="Remove"
+                  >
+                    <X className="w-2.5 h-2.5" />
+                  </button>
+                </motion.div>
+              ))}
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         {/* Textarea row */}
         <div className="flex items-end gap-2">
           <input
             ref={fileInputRef}
             type="file"
             accept=".pdf,.txt,.md,text/plain,text/markdown,application/pdf"
+            multiple
             className="hidden"
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file) uploadDocument(file);
-              e.target.value = "";
-            }}
+            onChange={handleFileSelect}
           />
 
           <button
             onClick={() => fileInputRef.current?.click()}
-            disabled={isUploading || isStreaming}
+            disabled={isStreaming}
             className={cn(
               "flex-shrink-0 p-2 rounded-xl transition-colors",
-              isUploading ? "text-brand-400 cursor-wait" : "text-neutral-500 hover:text-neutral-300"
+              "text-neutral-500 hover:text-neutral-300 disabled:opacity-40"
             )}
-            title={isUploading ? "Uploading..." : "Attach file for RAG"}
+            title="Attach file"
           >
             <Paperclip className="w-4 h-4" />
           </button>
@@ -210,6 +312,8 @@ export function MessageInput({
                   ? ""
                   : isStreaming
                   ? "Generating..."
+                  : isUploading
+                  ? "Uploading files..."
                   : placeholder
               }
               disabled={disabled}
@@ -221,7 +325,6 @@ export function MessageInput({
                 "scrollbar-thin scrollbar-thumb-neutral-600"
               )}
             />
-            {/* Live interim transcript overlay — shown during Web Speech recording */}
             {recordState === "recording" && interimText && (
               <div className="absolute inset-0 flex items-center py-2 px-1 pointer-events-none">
                 <span className="text-sm text-neutral-400 italic">{interimText}</span>
@@ -240,7 +343,13 @@ export function MessageInput({
                 ? "bg-brand-600 text-white hover:bg-brand-500 shadow-md"
                 : "bg-neutral-700 text-neutral-500 cursor-not-allowed"
             )}
-            title={isStreaming ? "Stop generating" : "Send message"}
+            title={
+              isUploading
+                ? "Waiting for upload to finish..."
+                : isStreaming
+                ? "Stop generating"
+                : "Send message"
+            }
           >
             {isStreaming ? <Square className="w-3 h-3 fill-current" /> : <ArrowUp className="w-4 h-4" />}
           </button>
@@ -250,7 +359,6 @@ export function MessageInput({
         {models.length > 0 && (
           <div className="flex items-center gap-2 mt-1.5 px-1">
             {hasMessages ? (
-              /* Locked — conversation is in progress */
               <div
                 className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs bg-neutral-800 border border-neutral-700 text-neutral-500"
                 title="Model is locked for this conversation. Start a new chat to use a different model."

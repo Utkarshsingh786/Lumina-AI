@@ -12,7 +12,9 @@ import toast from "react-hot-toast";
 function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const nextUrl = searchParams.get("next") || "/";
+  const rawNext = searchParams.get("next") || "/";
+  // Prevent open redirect — only allow relative paths
+  const nextUrl = rawNext.startsWith("/") ? rawNext : "/";
   const { setUser, setTokens } = useAuthStore();
   const [form, setForm] = useState({ email: "", password: "" });
   const [showPassword, setShowPassword] = useState(false);

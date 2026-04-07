@@ -132,6 +132,34 @@ class DocumentService:
         return Path(settings.LOCAL_STORAGE_PATH) / storage_path
 
     @staticmethod
+    def read_text(storage_path: str, file_type: str) -> str:
+        """
+        Extract plain text from a stored document.
+        Used for inline chat attachments — content is injected directly into the
+        AI context for that message turn (no chunking or embedding needed).
+        """
+        import io
+
+        path = DocumentService.get_absolute_path(storage_path)
+        if not path.exists():
+            return ""
+
+        file_bytes = path.read_bytes()
+
+        if file_type == "application/pdf":
+            try:
+                from pypdf import PdfReader
+                reader = PdfReader(io.BytesIO(file_bytes))
+                pages = [page.extract_text() or "" for page in reader.pages]
+                return "\n\n".join(p for p in pages if p.strip())
+            except Exception:
+                # Fall back to raw bytes if PDF parsing fails
+                return file_bytes.decode("utf-8", errors="replace")
+        else:
+            # text/plain, text/markdown — decode directly
+            return file_bytes.decode("utf-8", errors="replace")
+
+    @staticmethod
     def delete_file(storage_path: str) -> None:
         """Remove stored file (called on document delete)."""
         try:

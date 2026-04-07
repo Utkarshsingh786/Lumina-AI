@@ -2,7 +2,7 @@
 
 import React, { useState, useRef, useEffect } from "react";
 import { motion } from "framer-motion";
-import { Check, Copy, ThumbsDown, ThumbsUp, Pencil, RotateCcw, X, Calculator, Cloud, Search, Wrench } from "lucide-react";
+import { Check, Copy, ThumbsDown, ThumbsUp, Pencil, RotateCcw, X, Calculator, Cloud, Search, Wrench, FileText } from "lucide-react";
 import { cn, copyToClipboard, formatChatTime } from "@/lib/utils";
 import { MarkdownRenderer } from "@/components/shared/MarkdownRenderer";
 import { useSubmitFeedback } from "@/hooks/useConversations";
@@ -132,17 +132,21 @@ export function MessageBubble({
               </div>
             </div>
           ) : (
-            <div
-              className={cn(
-                "bg-brand-600/20 border border-brand-500/30 rounded-2xl rounded-tr-sm px-4 py-2.5",
-                "text-neutral-100 text-sm leading-relaxed max-w-[85%]",
-                message.is_edited && "opacity-90"
-              )}
-            >
-              <p className="whitespace-pre-wrap break-words">{message.content}</p>
-              {message.is_edited && (
-                <span className="text-xs text-neutral-400 mt-1 block">(edited)</span>
-              )}
+            <div className="max-w-[85%] flex flex-col items-end gap-1.5">
+              {/* Attachment chips */}
+              <AttachmentChips metadata={message.metadata} />
+              <div
+                className={cn(
+                  "bg-brand-600/20 border border-brand-500/30 rounded-2xl rounded-tr-sm px-4 py-2.5",
+                  "text-neutral-100 text-sm leading-relaxed w-full",
+                  message.is_edited && "opacity-90"
+                )}
+              >
+                <p className="whitespace-pre-wrap break-words">{message.content}</p>
+                {message.is_edited && (
+                  <span className="text-xs text-neutral-400 mt-1 block">(edited)</span>
+                )}
+              </div>
             </div>
           )
         ) : (
@@ -252,6 +256,26 @@ function ToolsBadges({ metadata }: { metadata: Record<string, unknown> }) {
           </span>
         );
       })}
+    </div>
+  );
+}
+
+function AttachmentChips({ metadata }: { metadata: Record<string, unknown> }) {
+  const attachments = metadata?.attachments as Array<{ filename: string; doc_id: string }> | undefined;
+  if (!attachments || attachments.length === 0) return null;
+
+  return (
+    <div className="flex flex-wrap gap-1.5 justify-end">
+      {attachments.map((att, i) => (
+        <span
+          key={i}
+          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs bg-neutral-700/80 border border-neutral-600 text-neutral-300"
+          title={att.filename}
+        >
+          <FileText className="w-3 h-3 flex-shrink-0 text-neutral-400" />
+          <span className="max-w-[150px] truncate">{att.filename || "Attached file"}</span>
+        </span>
+      ))}
     </div>
   );
 }

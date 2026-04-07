@@ -183,11 +183,14 @@ function HistoryPanel({
     <div className="flex flex-col flex-1 overflow-hidden">
       <div className="flex-1 overflow-y-auto p-2 space-y-1">
         {runs.map((run) => (
-          <button
+          <div
             key={run.id}
+            role="button"
+            tabIndex={0}
             onClick={() => onViewRun(run)}
+            onKeyDown={(e) => e.key === "Enter" && onViewRun(run)}
             className={cn(
-              "w-full text-left px-3 py-2.5 rounded-xl border transition-colors group",
+              "w-full text-left px-3 py-2.5 rounded-xl border transition-colors group cursor-pointer",
               selectedRunId === run.id
                 ? "bg-brand-500/10 border-brand-500/20"
                 : "hover:bg-neutral-800 border-transparent"
@@ -229,7 +232,7 @@ function HistoryPanel({
                 </button>
               </div>
             </div>
-          </button>
+          </div>
         ))}
       </div>
 

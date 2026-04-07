@@ -22,11 +22,17 @@ export async function streamChat(
   content: string,
   callbacks: StreamCallbacks,
   signal?: AbortSignal,
+  attachedDocIds?: string[],
 ): Promise<void> {
   const baseUrl = process.env.NEXT_PUBLIC_API_URL || "";
   const url = `${baseUrl}/api/v1/conversations/${conversationId}/chat`;
   const token = getStoredAccessToken();
   if (!token) { callbacks.onError("Not authenticated"); return; }
+
+  const body: Record<string, unknown> = { content, stream: true };
+  if (attachedDocIds && attachedDocIds.length > 0) {
+    body.attached_document_ids = attachedDocIds;
+  }
 
   let response: Response;
   try {
@@ -37,7 +43,7 @@ export async function streamChat(
         Authorization: `Bearer ${token}`,
         Accept: "text/event-stream",
       },
-      body: JSON.stringify({ content, stream: true }),
+      body: JSON.stringify(body),
       signal,
     });
   } catch (error) {

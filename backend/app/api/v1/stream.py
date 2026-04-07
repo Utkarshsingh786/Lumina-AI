@@ -113,6 +113,7 @@ async def chat(
                 conversation=conv,
                 user_message=request.content,
                 user_id=current_user.id,
+                attached_document_ids=request.attached_document_ids or None,
             ):
                 if chunk["type"] == "token":
                     yield _sse_event({"type": "token", "content": chunk["content"]})

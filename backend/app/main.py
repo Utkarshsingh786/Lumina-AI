@@ -14,6 +14,7 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import FastAPI, Request, status
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -83,6 +84,31 @@ def create_app() -> FastAPI:
     )
 
     # ── Exception Handlers ────────────────────────────
+    @app.exception_handler(RequestValidationError)
+    async def validation_exception_handler(
+        request: Request, exc: RequestValidationError
+    ) -> JSONResponse:
+        """
+        Normalize FastAPI/Pydantic 422 errors to the same {error_code, message, details}
+        shape as our custom exceptions, so the frontend has one consistent format.
+        """
+        errors = exc.errors()
+        # Build a human-readable message from the first error
+        first = errors[0] if errors else {}
+        # loc is like ["body", "email"] — skip the "body" prefix
+        loc_parts = [str(p) for p in first.get("loc", []) if p != "body"]
+        field = ".".join(loc_parts)
+        raw_msg = first.get("msg", "Invalid request data")
+        message = f"{field}: {raw_msg}" if field else raw_msg
+        return JSONResponse(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            content={
+                "error_code": "VALIDATION_ERROR",
+                "message": message,
+                "details": {"errors": errors},
+            },
+        )
+
     @app.exception_handler(LuminaError)
     async def lumina_exception_handler(
         request: Request, exc: LuminaError

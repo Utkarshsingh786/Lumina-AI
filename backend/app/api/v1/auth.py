@@ -48,6 +48,16 @@ async def refresh_token(
     return await service.refresh(data.refresh_token)
 
 
+@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+async def logout(_current_user: User = Depends(get_current_user)) -> None:
+    """
+    Acknowledge logout on the server side.
+    Tokens are stateless JWTs so revocation is handled client-side (clear sessionStorage).
+    This endpoint exists so clients have a standard hook for future token-blocklist logic.
+    """
+    return None
+
+
 @router.get("/me", response_model=UserResponse)
 async def get_me(current_user: User = Depends(get_current_user)) -> UserResponse:
     return UserResponse.model_validate(current_user)

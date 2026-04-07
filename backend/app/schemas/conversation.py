@@ -99,6 +99,9 @@ class ChatRequest(BaseModel):
     """
     content: str = Field(min_length=1, max_length=32_000)
     stream: bool = Field(default=True)
+    # Inline file attachments — IDs of documents uploaded for this specific message.
+    # Their text content is injected directly into this turn's context (not RAG).
+    attached_document_ids: list[str] | None = None
     # Tool use options
     enable_tools: bool = Field(default=False)
     tool_names: list[str] | None = None

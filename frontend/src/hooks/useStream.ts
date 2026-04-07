@@ -25,7 +25,7 @@ export function useStream(conversationId: string) {
   } = useChatStore();
 
   const sendMessage = useCallback(
-    async (content: string) => {
+    async (content: string, attachedDocIds?: string[]) => {
       const tempId = `temp-${Date.now()}`;
       const optimisticUserMessage: Message = {
         id: tempId,
@@ -35,7 +35,10 @@ export function useStream(conversationId: string) {
         content_type: "text",
         token_count: null,
         is_edited: false,
-        metadata: {},
+        // Show attachment chips optimistically in the message bubble
+        metadata: attachedDocIds?.length
+          ? { attachments: attachedDocIds.map((id) => ({ doc_id: id, filename: "" })) }
+          : {},
         created_at: new Date().toISOString(),
       };
 
@@ -78,7 +81,7 @@ export function useStream(conversationId: string) {
             onToolResult: (toolName, result, isError) => resolveToolCall(toolName, result, isError),
           },
           abortController.signal,
-          // No model override — model lives in the conversation DB record
+          attachedDocIds,
         );
       } catch (error) {
         stopStreaming();
